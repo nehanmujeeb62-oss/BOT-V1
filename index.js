@@ -26,6 +26,8 @@ const storeHours = process.env.STORE_HOURS || "Staff reply when available.";
 const contactInfo = process.env.CONTACT_INFO || "Open a ticket or message a staff member.";
 const faqInfo = process.env.FAQ_INFO || "Use !store to view products, !order to start buying, and !ticketpanel to open support.";
 const port = process.env.PORT || 3000;
+const databasePath = path.join(__dirname, "database.json");
+const productsPath = path.join(__dirname, "products.json");
 
 if (!token) {
   console.error("Missing DISCORD_TOKEN. Copy .env.example to .env and add your bot token.");
@@ -50,10 +52,43 @@ function isStaff(message) {
   return hasAdmin || hasOwnerRole || hasStaffRole;
 }
 
+function ensureDatabase() {
+  if (fs.existsSync(databasePath)) return;
+
+  let products = [];
+  if (fs.existsSync(productsPath)) {
+    products = JSON.parse(fs.readFileSync(productsPath, "utf8"));
+  }
+
+  const database = {
+    products: products.map((product) => ({
+      ...product,
+      stock: product.stock ?? "In stock"
+    })),
+    orders: [],
+    reviews: []
+  };
+
+  fs.writeFileSync(databasePath, JSON.stringify(database, null, 2));
+}
+
+function readDatabase() {
+  ensureDatabase();
+  return JSON.parse(fs.readFileSync(databasePath, "utf8"));
+}
+
+function writeDatabase(database) {
+  fs.writeFileSync(databasePath, JSON.stringify(database, null, 2));
+}
+
 function loadProducts() {
-  const productPath = path.join(__dirname, "products.json");
-  const raw = fs.readFileSync(productPath, "utf8");
-  return JSON.parse(raw);
+  return readDatabase().products;
+}
+
+function findProduct(database, productName) {
+  return database.products.find((product) => {
+    return product.name.toLowerCase() === productName.toLowerCase();
+  });
 }
 
 function storeEmbed() {
@@ -72,7 +107,8 @@ function storeEmbed() {
       value: [
         product.description,
         `Price: ${product.price}`,
-        `Duration: ${product.duration}`
+        `Duration: ${product.duration}`,
+        `Stock: ${product.stock ?? "In stock"}`
       ].join("\n")
     });
   }
@@ -88,6 +124,7 @@ function storeText() {
     lines.push(`${product.name} - ${product.price}`);
     lines.push(`${product.description}`);
     lines.push(`Duration: ${product.duration}`);
+    lines.push(`Stock: ${product.stock ?? "In stock"}`);
     lines.push("");
   }
 
@@ -105,6 +142,8 @@ function helpEmbed() {
       { name: `${prefix}prices`, value: "Show product names and prices." },
       { name: `${prefix}stock`, value: "Show current stock list." },
       { name: `${prefix}order <item>`, value: "Start an order for an item." },
+      { name: `${prefix}orders`, value: "Staff only. Show recent orders." },
+      { name: `${prefix}reviews`, value: "Show recent reviews." },
       { name: `${prefix}buy`, value: "Show how to buy." },
       { name: `${prefix}faq`, value: "Show store FAQ." },
       { name: `${prefix}hours`, value: "Show store hours." },
@@ -122,6 +161,10 @@ function helpEmbed() {
       { name: `${prefix}say <message>`, value: "Staff only. Make the bot send your message." },
       { name: `${prefix}announce <message>`, value: "Staff only. Send a styled announcement." },
       { name: `${prefix}dm @user <message>`, value: "Staff only. DM a customer." },
+      { name: `${prefix}addproduct name | price | duration | description`, value: "Staff only. Add a product to the database." },
+      { name: `${prefix}editproduct name | price | duration | description`, value: "Staff only. Edit a product in the database." },
+      { name: `${prefix}removeproduct name`, value: "Staff only. Remove a product from the database." },
+      { name: `${prefix}setstock name | stock`, value: "Staff only. Update product stock." },
       { name: `${prefix}restock <message>`, value: "Staff only. Post a restock notice." },
       { name: `${prefix}soldout <message>`, value: "Staff only. Post a sold-out notice." },
       { name: `${prefix}clear <number>`, value: "Staff only. Delete 1 to 50 recent messages." },
@@ -226,6 +269,8 @@ client.on("messageCreate", async (message) => {
       `${prefix}prices - Show prices`,
       `${prefix}stock - Show stock`,
       `${prefix}order <item> - Start order`,
+      `${prefix}orders - Staff recent orders`,
+      `${prefix}reviews - Recent reviews`,
       `${prefix}buy - How to buy`,
       `${prefix}faq - Store FAQ`,
       `${prefix}hours - Store hours`,
@@ -243,6 +288,10 @@ client.on("messageCreate", async (message) => {
       `${prefix}say <message> - Staff announcement`,
       `${prefix}announce <message> - Staff embed announcement`,
       `${prefix}dm @user <message> - Staff DM`,
+      `${prefix}addproduct name | price | duration | description - Staff add product`,
+      `${prefix}editproduct name | price | duration | description - Staff edit product`,
+      `${prefix}removeproduct name - Staff remove product`,
+      `${prefix}setstock name | stock - Staff update stock`,
       `${prefix}restock <message> - Staff restock notice`,
       `${prefix}soldout <message> - Staff sold-out notice`,
       `${prefix}clear <number> - Staff clear messages`,
@@ -272,7 +321,7 @@ client.on("messageCreate", async (message) => {
 
   if (command === "stock") {
     const products = loadProducts();
-    const stock = products.map((product) => `In stock: ${product.name}`).join("\n");
+    const stock = products.map((product) => `${product.name}: ${product.stock ?? "In stock"}`).join("\n");
     await message.channel.send(stock || "No products are listed right now.");
     return;
   }
@@ -284,7 +333,47 @@ client.on("messageCreate", async (message) => {
 
   if (command === "order") {
     const item = args.join(" ").trim();
-    await message.channel.send(item ? `Order request for "${item}": ${ticketInfo}` : `Use it like this: ${prefix}order Product Name`);
+    if (!item) {
+      await message.channel.send(`Use it like this: ${prefix}order Product Name`);
+      return;
+    }
+
+    const database = readDatabase();
+    const order = {
+      id: database.orders.length + 1,
+      item,
+      userId: message.author.id,
+      userTag: message.author.tag,
+      status: "open",
+      createdAt: new Date().toISOString()
+    };
+    database.orders.push(order);
+    writeDatabase(database);
+
+    await message.channel.send(`Order #${order.id} saved for "${item}". ${ticketInfo}`);
+    return;
+  }
+
+  if (command === "orders") {
+    if (!isStaff(message)) {
+      await message.reply("Only staff can use this command.");
+      return;
+    }
+
+    const database = readDatabase();
+    const orders = database.orders.slice(-10).map((order) => {
+      return `#${order.id} ${order.item} - ${order.userTag} - ${order.status}`;
+    });
+    await message.channel.send(orders.length ? orders.join("\n") : "No orders saved yet.");
+    return;
+  }
+
+  if (command === "reviews") {
+    const database = readDatabase();
+    const reviews = database.reviews.slice(-5).map((review) => {
+      return `${review.userTag}: ${review.message}`;
+    });
+    await message.channel.send(reviews.length ? reviews.join("\n") : "No reviews saved yet.");
     return;
   }
 
@@ -309,6 +398,15 @@ client.on("messageCreate", async (message) => {
       await message.reply(`Use it like this: ${prefix}review Great service`);
       return;
     }
+
+    const database = readDatabase();
+    database.reviews.push({
+      userId: message.author.id,
+      userTag: message.author.tag,
+      message: text,
+      createdAt: new Date().toISOString()
+    });
+    writeDatabase(database);
 
     const embed = new EmbedBuilder()
       .setColor(0x27ae60)
@@ -460,6 +558,119 @@ client.on("messageCreate", async (message) => {
 
     await user.send(text);
     await message.reply(`DM sent to ${user.tag}.`);
+    return;
+  }
+
+  if (command === "addproduct") {
+    if (!isStaff(message)) {
+      await message.reply("Only staff can use this command.");
+      return;
+    }
+
+    const parts = args.join(" ").split("|").map((part) => part.trim());
+    const [name, price, duration, description] = parts;
+    if (!name || !price || !duration || !description) {
+      await message.reply(`Use it like this: ${prefix}addproduct Name | $5 | 1 month | Product description`);
+      return;
+    }
+
+    const database = readDatabase();
+    if (findProduct(database, name)) {
+      await message.reply("That product already exists.");
+      return;
+    }
+
+    database.products.push({
+      name,
+      price,
+      duration,
+      description,
+      stock: "In stock"
+    });
+    writeDatabase(database);
+    await message.reply(`Product added: ${name}`);
+    return;
+  }
+
+  if (command === "editproduct") {
+    if (!isStaff(message)) {
+      await message.reply("Only staff can use this command.");
+      return;
+    }
+
+    const parts = args.join(" ").split("|").map((part) => part.trim());
+    const [name, price, duration, description] = parts;
+    if (!name || !price || !duration || !description) {
+      await message.reply(`Use it like this: ${prefix}editproduct Name | $5 | 1 month | New description`);
+      return;
+    }
+
+    const database = readDatabase();
+    const product = findProduct(database, name);
+    if (!product) {
+      await message.reply("Product not found.");
+      return;
+    }
+
+    product.price = price;
+    product.duration = duration;
+    product.description = description;
+    writeDatabase(database);
+    await message.reply(`Product updated: ${product.name}`);
+    return;
+  }
+
+  if (command === "removeproduct") {
+    if (!isStaff(message)) {
+      await message.reply("Only staff can use this command.");
+      return;
+    }
+
+    const name = args.join(" ").trim();
+    if (!name) {
+      await message.reply(`Use it like this: ${prefix}removeproduct Product Name`);
+      return;
+    }
+
+    const database = readDatabase();
+    const before = database.products.length;
+    database.products = database.products.filter((product) => {
+      return product.name.toLowerCase() !== name.toLowerCase();
+    });
+
+    if (database.products.length === before) {
+      await message.reply("Product not found.");
+      return;
+    }
+
+    writeDatabase(database);
+    await message.reply(`Product removed: ${name}`);
+    return;
+  }
+
+  if (command === "setstock") {
+    if (!isStaff(message)) {
+      await message.reply("Only staff can use this command.");
+      return;
+    }
+
+    const parts = args.join(" ").split("|").map((part) => part.trim());
+    const [name, stock] = parts;
+    if (!name || !stock) {
+      await message.reply(`Use it like this: ${prefix}setstock Product Name | 5 available`);
+      return;
+    }
+
+    const database = readDatabase();
+    const product = findProduct(database, name);
+    if (!product) {
+      await message.reply("Product not found.");
+      return;
+    }
+
+    product.stock = stock;
+    writeDatabase(database);
+    await message.reply(`Stock updated for ${product.name}: ${stock}`);
     return;
   }
 
