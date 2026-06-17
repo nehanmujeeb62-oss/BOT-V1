@@ -1,0 +1,20 @@
+[
+  {
+    "name": "Product 1",
+    "description": "Rename this to a product your store is allowed to sell.",
+    "price": "$0.00",
+    "duration": "1 month"
+  },
+  {
+    "name": "Product 2",
+    "description": "Rename this to another legitimate product or service.",
+    "price": "$0.00",
+    "duration": "3 months"
+  },
+  {
+    "name": "Product 3",
+    "description": "Add payment and delivery details in your ticket or checkout flow.",
+    "price": "$0.00",
+    "duration": "Custom"
+  }
+]
