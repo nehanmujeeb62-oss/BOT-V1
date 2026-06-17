@@ -1,0 +1,27 @@
+{
+  "products": [
+    {
+      "name": "Product 1",
+      "description": "Rename this to a product your store is allowed to sell.",
+      "price": "$0.00",
+      "duration": "1 month",
+      "stock": "In stock"
+    },
+    {
+      "name": "Product 2",
+      "description": "Rename this to another legitimate product or service.",
+      "price": "$0.00",
+      "duration": "3 months",
+      "stock": "In stock"
+    },
+    {
+      "name": "Product 3",
+      "description": "Add payment and delivery details in your ticket or checkout flow.",
+      "price": "$0.00",
+      "duration": "Custom",
+      "stock": "In stock"
+    }
+  ],
+  "orders": [],
+  "reviews": []
+}
