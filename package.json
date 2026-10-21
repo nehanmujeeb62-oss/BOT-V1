@@ -1,7 +1,7 @@
 {
   "name": "discord-store-bot",
   "version": "1.0.0",
-  "description": "A simple Discord store announcement bot with !say and product embeds.",
+  "description": "Discord store bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
